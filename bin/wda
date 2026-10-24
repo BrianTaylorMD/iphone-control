@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""wda — WebDriverAgent on your iPhone: read the screen as elements, tap by name.
+
+  wda build                       one-time (and every 7 days on a free Apple ID): fetch + sign + build WebDriverAgent
+  wda start | stop | status       start = xcodebuild session (WDA bound to the PHONE'S LOOPBACK only) + usbmux forward
+  wda els [--all]                 visible labeled elements: type | label | x y (iOS points, same frame as `phone shot`)
+  wda text                        visible text, top to bottom
+  wda tap "Label"                 tap the element whose label matches (exact, then contains; Buttons/Cells first)
+  wda tapxy X Y                   tap a point
+  wda type "text"                 type into the focused field
+  wda home | app | launch BUNDLE_ID
+
+Security: WDA has no authentication, so it binds to 127.0.0.1 on the phone (TEST_RUNNER_USE_IP) and this Mac reaches it
+through usbmuxd. That means wda works over the CABLE or the SAME Wi-Fi only, not over `phone start --remote`; remotely,
+use `phone shot` and coordinate taps. Nothing on the LAN or tailnet can reach WDA. Stop it when done.
+Settings come from ~/.config/iphone-control/config.json (udid, team_id, wda_bundle_id, optional wda_dir).
+"""
+import contextlib
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phonecfg  # noqa: E402  (per-user values live outside the repo)
+
+CFG = phonecfg.load()
+UDID = phonecfg.require(CFG, "udid", "see docs/setup.md §3")
+BASE = "http://127.0.0.1:8100"
+CACHE = Path.home() / ".cache/iphone"
+STATE = CACHE / "wda.json"
+WDA_DIR = Path(CFG.get("wda_dir", "~/.local/share/iphone-control/wda")).expanduser()
+SRC = WDA_DIR / "appium-ios/packages/webdriveragent"
+PMD = Path.home() / ".local/bin/pymobiledevice3"
+XCODE = "/Applications/Xcode.app/Contents/Developer"
+
+
+def http(method: str, path: str, body=None, timeout=30):
+    req = urllib.request.Request(BASE + path, method=method,
+                                 data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def up() -> bool:
+    try:
+        return http("GET", "/status", timeout=3).get("value", {}).get("ready", True) is not False
+    except Exception:
+        return False
+
+
+def pgrep(pattern: str) -> list:
+    out = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", pattern], capture_output=True, text=True).stdout
+    return [int(p) for p in out.split()]
+
+
+def state() -> dict:
+    try:
+        return json.loads(STATE.read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def save_state(**kv) -> None:
+    st = state(); st.update(kv)
+    STATE.write_text(json.dumps(st))
+
+
+def ours() -> list:
+    """PIDs this tool started (xcodebuild session + usbmux forward) that are still alive."""
+    alive = []
+    for pid in state().get("pids", []):
+        try:
+            os.kill(pid, 0); alive.append(pid)
+        except OSError:
+            pass
+    return alive
+
+
+FORWARD = ["usbmux", "forward", "--udid", UDID, "8100", "8100"]
+
+
+def session() -> str:
+    sid = state().get("sid")
+    if sid:
+        try:
+            http("GET", f"/session/{sid}", timeout=5)
+            return sid
+        except Exception:
+            pass
+    sid = http("POST", "/session", {"capabilities": {"alwaysMatch": {}}})["sessionId"]
+    # Don't wait for the app to go idle or for animations: we verify with our own screenshots.
+    http("POST", f"/session/{sid}/appium/settings",
+         {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0, "snapshotMaxDepth": 30}})
+    save_state(sid=sid)
+    return sid
+
+
+def xctestrun() -> Path:
+    runs = sorted((WDA_DIR / "dd/Build/Products").glob("WebDriverAgentRunner_iphoneos*.xctestrun"))
+    if not runs:
+        sys.exit("WebDriverAgent isn't built yet: run `wda build` first")
+    return runs[-1]
+
+
+def build() -> int:
+    """Fetch WebDriverAgent (appium/appium-ios, Apache-2.0) and build it signed with YOUR Apple ID team."""
+    WDA_DIR.mkdir(parents=True, exist_ok=True)
+    if not SRC.exists():
+        subprocess.run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+                        "https://github.com/appium/appium-ios.git"], cwd=WDA_DIR, check=True)
+        subprocess.run(["git", "sparse-checkout", "set", "packages/webdriveragent"], cwd=WDA_DIR / "appium-ios", check=True)
+    env = dict(os.environ, DEVELOPER_DIR=XCODE)
+    if not CFG.get("team_id") or not CFG.get("wda_bundle_id"):
+        # A build without a team fails, but makes xcodebuild fetch and cache the teams of the Apple ID signed into Xcode.
+        subprocess.run(["xcodebuild", "build-for-testing", "-project", "WebDriverAgent.xcodeproj", "-scheme",
+                        "WebDriverAgentRunner", "-destination", f"id={UDID}", "-derivedDataPath", str(WDA_DIR / "dd"),
+                        "-allowProvisioningUpdates"], cwd=SRC, env=env, capture_output=True)
+        out = subprocess.run(["defaults", "export", "com.apple.dt.xcodebuild", "-"], capture_output=True).stdout
+        import plistlib
+        teams = [t for acct in plistlib.loads(out).get("IDEProvisioningTeamByIdentifier", {}).values() for t in acct] if out else []
+        print(json.dumps({"ok": False, "next": "put team_id and a unique wda_bundle_id in ~/.config/iphone-control/config.json, then run `wda build` again",
+                          "teams_found": [{"team_id": t.get("teamID"), "name": t.get("teamName")} for t in teams]}, indent=1))
+        return 1
+    r = subprocess.run(["xcodebuild", "build-for-testing", "-project", "WebDriverAgent.xcodeproj",
+                        "-scheme", "WebDriverAgentRunner", "-destination", f"id={UDID}",
+                        "-derivedDataPath", str(WDA_DIR / "dd"), "-allowProvisioningUpdates",
+                        "-allowProvisioningDeviceRegistration", f"DEVELOPMENT_TEAM={CFG['team_id']}",
+                        f"PRODUCT_BUNDLE_IDENTIFIER={CFG['wda_bundle_id']}", "COMPILER_INDEX_STORE_ENABLE=NO"],
+                       cwd=SRC, env=env, stdout=open(WDA_DIR / "build.log", "w"), stderr=subprocess.STDOUT)
+    tail = (WDA_DIR / "build.log").read_text(errors="ignore")[-400:]
+    print(json.dumps({"ok": r.returncode == 0, "log": str(WDA_DIR / "build.log"), "tail": tail}))
+    return r.returncode
+
+
+def start() -> int:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    started = []
+    if not pgrep(" ".join(FORWARD)):
+        fwd = subprocess.Popen([str(PMD), *FORWARD], stdout=open(CACHE / "forward.log", "a"),
+                               stderr=subprocess.STDOUT, start_new_session=True)
+        started.append(fwd.pid)
+    if up():
+        print(json.dumps({"ok": True, "already": True, "session": session()})); return 0
+    env = dict(os.environ, DEVELOPER_DIR=XCODE, TEST_RUNNER_USE_IP="127.0.0.1", TEST_RUNNER_USE_PORT="8100")
+    xcb = subprocess.Popen(["xcodebuild", "test-without-building", "-xctestrun", str(xctestrun()), "-destination", f"id={UDID}"],
+                     env=env, cwd=WDA_DIR, stdout=open(WDA_DIR / "wda-run.log", "w"), stderr=subprocess.STDOUT,
+                     start_new_session=True)
+    save_state(pids=ours() + started + [xcb.pid])
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 60:
+        time.sleep(1)
+        if up():
+            print(json.dumps({"ok": True, "secs": round(time.monotonic() - t0, 1), "session": session()})); return 0
+        log = (WDA_DIR / "wda-run.log").read_text(errors="ignore")
+        if "could not be launched" in log or "TEST EXECUTE FAILED" in log:
+            break
+    tail = (WDA_DIR / "wda-run.log").read_text(errors="ignore")[-600:]
+    print(json.dumps({"ok": False, "error": "WDA did not come up (phone unlocked? profile older than 7 days?)", "log": tail}))
+    return 1
+
+
+def stop() -> int:
+    # Only what `wda start` launched (recorded PIDs), plus anything still running our exact xctestrun/forward command.
+    targets = set(ours()) | set(pgrep(" ".join(FORWARD)))
+    runs = list((WDA_DIR / "dd/Build/Products").glob("WebDriverAgentRunner_iphoneos*.xctestrun"))
+    for r in runs:
+        targets |= set(pgrep(f"xcodebuild test-without-building -xctestrun {r}"))
+    for p in targets:
+        with contextlib.suppress(OSError):
+            os.kill(p, 15)
+    STATE.unlink(missing_ok=True)
+    print("stopped"); return 0
+
+
+def elements(all_types=False) -> list:
+    root = http("GET", "/source?format=json&excluded_attributes=visible,accessible")["value"]
+    sw, sh = root["rect"]["width"], root["rect"]["height"]
+    out, seen = [], set()
+
+    def walk(n):
+        r = n.get("rect") or {}
+        label = n.get("label") or n.get("value") or ""
+        cx, cy = r.get("x", 0) + r.get("width", 0) / 2, r.get("y", 0) + r.get("height", 0) / 2
+        on_screen = r.get("width", 0) > 0 and 0 <= cx <= sw and 0 <= cy <= sh
+        key = (str(label), round(cx / 4), round(cy / 4))  # layered views repeat the same label at the same spot
+        if label and on_screen and key not in seen and (all_types or n.get("type") not in ("Other", "Application", "Window", "Toolbar")):
+            seen.add(key)
+            out.append({"type": n.get("type"), "label": str(label), "x": round(cx), "y": round(cy),
+                        "enabled": n.get("isEnabled", True)})
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return out
+
+
+def tap_xy(x, y) -> None:
+    http("POST", f"/session/{session()}/wda/tap", {"x": x, "y": y})
+
+
+def main() -> int:
+    os.umask(0o077)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    os.chmod(CACHE, 0o700)
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__); return 0
+    cmd, t0 = a[0], time.monotonic()
+    if cmd == "build": return build()
+    if cmd == "start": return start()
+    if cmd == "stop": return stop()
+    if cmd == "status":
+        print(json.dumps({"up": up(), "pids": ours()})); return 0
+    if not up():
+        print(json.dumps({"ok": False, "error": "WDA not running: `wda start` (phone unlocked)"})); return 1
+    if cmd == "els":
+        for e in elements("--all" in a):
+            print(f'{e["type"]:<12} | {e["label"][:60]:<60} | {e["x"]} {e["y"]}{"" if e["enabled"] else " (disabled)"}')
+    elif cmd == "text":
+        seen = set()
+        for e in sorted(elements(), key=lambda e: (e["y"], e["x"])):
+            if e["type"] in ("StaticText", "TextView", "TextField", "Link") and e["label"] not in seen:
+                seen.add(e["label"]); print(e["label"])
+    elif cmd == "tap":
+        want = " ".join(a[1:]).strip().lower()
+        if len(want) < 2:   # an empty label would "contain"-match every element and tap whatever ranks first
+            print(json.dumps({"ok": False, "error": "usage: wda tap LABEL (at least 2 characters)"})); return 1
+        els = elements(all_types=True)
+        rank = {"Button": 0, "Cell": 1, "Icon": 1, "Link": 2, "Switch": 2, "StaticText": 3}
+        hits = [e for e in els if e["label"].lower() == want] or [e for e in els if want in e["label"].lower()]
+        if not hits:
+            print(json.dumps({"ok": False, "error": f"no element labeled {want!r}"})); return 1
+        e = sorted(hits, key=lambda e: rank.get(e["type"], 5))[0]
+        tap_xy(e["x"], e["y"])
+        print(json.dumps({"ok": True, "tapped": e, "ms": round((time.monotonic() - t0) * 1000)}))
+    elif cmd == "tapxy":
+        tap_xy(float(a[1]), float(a[2])); print(json.dumps({"ok": True, "ms": round((time.monotonic() - t0) * 1000)}))
+    elif cmd == "type":
+        http("POST", f"/session/{session()}/wda/keys", {"value": list(" ".join(a[1:]))})
+        print(json.dumps({"ok": True, "ms": round((time.monotonic() - t0) * 1000)}))
+    elif cmd == "home":
+        http("POST", "/wda/homescreen"); print(json.dumps({"ok": True, "ms": round((time.monotonic() - t0) * 1000)}))
+    elif cmd == "app":
+        print(json.dumps(http("GET", "/wda/activeAppInfo")["value"]))
+    elif cmd == "launch":
+        http("POST", f"/session/{session()}/wda/apps/launch", {"bundleId": a[1]})
+        print(json.dumps({"ok": True, "ms": round((time.monotonic() - t0) * 1000)}))
+    else:
+        print(__doc__); return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

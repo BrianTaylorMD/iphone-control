@@ -1,0 +1,13 @@
+# personal / machine-specific — never commit
+LOCAL.md
+config.json
+*.plist
+# build outputs and captures
+bin/iphonectl
+*.png
+*.jpg
+*.bmp
+*.log
+*.html
+__pycache__/
+.DS_Store

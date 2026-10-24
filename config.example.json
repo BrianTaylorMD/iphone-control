@@ -1,0 +1,10 @@
+{
+  "udid": "",
+  "phone_tailscale_ip": "",
+  "host_identifier": "",
+  "team_id": "",
+  "wda_bundle_id": "",
+  "wda_dir": "~/.local/share/iphone-control/wda",
+  "screen_points": [440, 956],
+  "screen_scale": 3
+}

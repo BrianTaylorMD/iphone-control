@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""pin-host-id — make remote (Tailscale) control survive macOS hostname changes.
+
+pymobiledevice3 identifies your Mac to the phone as uuid3(NAMESPACE_DNS, hostname). macOS changes the hostname with the
+network (e.g. "Mac" on one network, "Name-MacBook-Pro.local" on another). The phone then sees an unknown host and
+pair-verify fails with TLV error 2. Run this right after `pymobiledevice3 lockdown remotepairing --pair`, on the same
+network: it records the ID the phone just learned in the pairing record (`host_identifier`, which pymobiledevice3 reads)
+and in ~/.config/iphone-control/config.json.
+
+  pin-host-id [UDID]        (UDID defaults to config "udid")
+  pin-host-id --id ID       pin a specific ID instead of the current hostname's
+"""
+import json
+import os
+import platform
+import plistlib
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phonecfg  # noqa: E402
+
+args = sys.argv[1:]
+cfg = phonecfg.load()
+host_id = args[args.index("--id") + 1] if "--id" in args else str(uuid.uuid3(uuid.NAMESPACE_DNS, platform.node())).upper()
+udid = next((a for a in args if a != "--id" and a != host_id), cfg["udid"])
+record = Path.home() / f".pymobiledevice3/remote_{udid}.plist"
+if not record.exists():
+    sys.exit(f"no RemotePairing record at {record}: run `pymobiledevice3 lockdown remotepairing --pair` first (phone on USB)")
+raw = record.read_bytes()
+fmt = plistlib.FMT_BINARY if raw.startswith(b"bplist") else plistlib.FMT_XML
+data = plistlib.loads(raw)
+backup = record.with_suffix(".plist.bak")
+if not backup.exists():
+    backup.write_bytes(raw)
+    os.chmod(backup, 0o600)
+data["host_identifier"] = host_id
+record.write_bytes(plistlib.dumps(data, fmt=fmt))
+os.chmod(record, 0o600)
+os.chmod(record.parent, 0o700)
+cfg["host_identifier"] = host_id
+phonecfg.PATH.write_text(json.dumps(cfg, indent=2))
+os.chmod(phonecfg.PATH, 0o600)
+print(json.dumps({"ok": True, "host_identifier": host_id, "hostname_now": platform.node(), "record": str(record)}))
