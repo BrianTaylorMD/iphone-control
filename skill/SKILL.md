@@ -56,6 +56,7 @@ returned path. `type` is ASCII-only (use `paste` for anything else); text may co
 |---|---|---|
 | Tap | `tap X Y` | 50 ms |
 | Scroll | `drag 220 750 220 300 250` (finger up = content moves down) | 270 ms |
+| Long-press / move an icon | `hold X1 Y1 [X2 Y2 PRESS_MS MOVE_MS HOVER_MS]`: press, hold, slide, hover, release. Long-press: `hold 220 745 220 745 1300 0 0`. In edit mode, drop on an app to make a folder: `hold 169 345 369 345 250 500 1100`; into a folder: hover 600. To the left edge with hover 1500 flips one page | |
 | Type ASCII | `type hello world` | ~50 ms/char |
 | Exact text (emoji, accents, no autocorrect) | `paste Café ☕ 3:45pm` | 0.73 s; the phone's clipboard is restored |
 | Keys | `key enter` · `key backspace 5` · `key escape` · `key down 3` | ~50 ms |

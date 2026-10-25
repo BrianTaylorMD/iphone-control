@@ -189,6 +189,24 @@ class Phone:
         await self.hid.send_touchscreen(TOUCHSCREEN_STATE_CONTACT, c, d)
         await self.hid.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, c, d)
 
+    async def hold(self, x1, y1, x2, y2, press_ms=600, move_ms=400, hover_ms=0) -> None:
+        """Press and hold, then move and hover before releasing: long-press, icon drags, drop-onto-icon folders."""
+        from pymobiledevice3.remote.core_device.hid_service import TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE
+        (a, b), (c, d) = self.norm(x1, y1), self.norm(x2, y2)
+
+        async def stay(x, y, ms):  # keep reporting the contact so the finger counts as still down
+            for _ in range(max(1, int(ms / 16))):
+                await self.hid.send_touchscreen(TOUCHSCREEN_STATE_CONTACT, x, y)
+                await asyncio.sleep(0.016)
+        await stay(a, b, press_ms)
+        steps = max(1, int(move_ms / 16))
+        for i in range(1, steps + 1):
+            t = i / steps
+            await self.hid.send_touchscreen(TOUCHSCREEN_STATE_CONTACT, round(a + (c - a) * t), round(b + (d - b) * t))
+            await asyncio.sleep(move_ms / 1000 / steps)
+        await stay(c, d, hover_ms)
+        await self.hid.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, c, d)
+
     async def keys(self, usages) -> None:
         await self.hid.send_keyboard(self.kb, usages)
         await asyncio.sleep(0.03)
@@ -310,6 +328,7 @@ class Phone:
         if cmd == "ping": return {"ok": True}
         if cmd == "tap": await self.tap(f(0), f(1))
         elif cmd == "drag": await self.drag(f(0), f(1), f(2), f(3), f(4, 300))
+        elif cmd == "hold": await self.hold(f(0), f(1), f(2, f(0)), f(3, f(1)), f(4, 600), f(5, 400), f(6, 0))
         elif cmd == "type": await self.type(rest)
         elif cmd == "paste": await self.paste(rest)
         elif cmd == "key": await self.key(a[0] if a else "", int(f(1, 1)))

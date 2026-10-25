@@ -55,6 +55,17 @@ Xcode 27.1. Treat these as facts for this setup, not guarantees for others.
 | Window | It resizes per app and orientation (Home 456 wide, Settings 734 wide in split view), so take coordinates from a fresh screenshot. |
 | Open any app | Spotlight → type the name → wait ~300 ms → Return: 0.95–1.2 s. Without the wait, Return is lost. |
 
+## Home Screen editing (developer channel, iOS 27.0, 2026-10-25)
+
+| Thing | Result |
+|---|---|
+| Edit mode | `hold` on empty space for 1.3 s enters it; Done is the check mark at top right. |
+| Make a folder / add to one | Drag an app onto an app and hover ~1.1 s (iOS names it, e.g. "Utilities", or "Folder"); onto a folder, hover ~0.6 s. Each move re-flows the grid, so take a fresh `shot` before the next drag. |
+| Move to another page | Drag to the left edge and hover ~1.5 s: the page flips and the icon lands in a free slot. **Hovering ~3 s flips two pages and drops it on page 1, which re-flows page 1 (widgets included)**: avoid; flip one page at a time. |
+| Rename a folder | Open it in edit mode, tap the name's clear (x) button, `type` the name, `key enter`. |
+| Folder icon shows only one app | A folder that spilled onto a second page shows that page while in edit mode; it shows the first page again after Done. |
+| WebDriverAgent start | iOS 27 asked for the iPhone passcode ("Enter iPhone Passcode for XCTest, Enable UI Automation"). Agents must not type passcodes: dismiss it and use `phone` touches, or have the user enter it. |
+
 ## Approaches not taken
 
 - **Xcode 27's MCP device tools** (DeviceInteraction): Simulator-only on 27.1.
