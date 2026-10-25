@@ -28,6 +28,7 @@ Run `phone stop` / `wda stop` when done: while connected, the phone shows an ind
 |---|---|---|---|
 | Open a Settings page | `<skill>/bin/open settings NAME` (deep link) | 0.3 s | Spotlight: `tap search` + `type` + tap result, ~3 s |
 | Open any URL / app screen | `<skill>/bin/open URL [BUNDLE]`, `open app BUNDLE` | 0.2-0.5 s | `wda launch`, Spotlight |
+| Deep link while `phoned` runs (also over `--remote` / Tailscale) | `phone "url com.apple.Preferences prefs:root=DISPLAY"` | 0.18-0.24 s | `open` (cable/same network) |
 | Rearrange the whole Home Screen | `<skill>/bin/layout set SPEC.json` (one write, verified by re-read) | 2.3 s | `phone hold` drags, ~3 s per icon |
 | See the Home Screen without unlocking | `<skill>/bin/layout preview OUT.png` (SpringBoard render of page 1) | <1 s | `phone shot` (needs unlocked) |
 | Read the layout | `<skill>/bin/layout show` | 0.06 s | screenshots |
@@ -79,6 +80,8 @@ returned path. `type` is ASCII-only (use `paste` for anything else); text may co
 | Buttons | `button home` · `button lock` · `button volup` · `button voldown` | 51 ms |
 | Screenshot | `shot` | 30–70 ms |
 | Read phone clipboard | `clipboard` | ms |
+| Deep link | `url BUNDLE URL` (Settings is relaunched; tel:/facetime: refused) | ~0.2 s |
+| Long-press / drag | `hold X1 Y1 X2 Y2 PRESS MOVE HOVER` | |
 | Pause | `wait MS` | |
 
 **Chain predictable steps into one `phone` call**: each tool call costs seconds, while each step costs milliseconds.

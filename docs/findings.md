@@ -75,6 +75,7 @@ Xcode 27.1. Treat these as facts for this setup, not guarantees for others.
 | `prefs:root=` that fall back to the Settings root | FOCUS, CONTROL_CENTER, STANDBY, KEYBOARD. |
 | `maps://?q=` | Opens Maps but the query was not applied. |
 | Action button page | The carousel IS the setting: a swipe changes it at once, a swipe skips 2 items, and leaving "Shortcut" with none chosen falls to "No Action"; the chosen control is forgotten when you pass through other modes. Step one item by tapping beside the page dots. |
+| Deep links over the CoreDevice tunnel | `launchapplication` with `options.payloadURL = {"relative": URL}` (what devicectl sends) works through phoned's tunnel, **including RemotePairing over Tailscale**: 0.18-0.24 s. |
 | SpringBoard `getWallpaperPreviewImage homescreen` | Renders page 1 of the Home Screen with icons (1320 x 2868 PNG). A way to verify a layout write without the screen. |
 | `setIconState` dictionary form `{buttonBar, iconLists, ignored}` | Writing back the identical layout changed nothing (re-read matched, page count unchanged), 2.3 s including backup and verify. `ignored` = every installed User/System app (placeholders and hidden services included) not placed. |
 

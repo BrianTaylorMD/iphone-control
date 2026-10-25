@@ -207,6 +207,20 @@ class Phone:
         await stay(c, d, hover_ms)
         await self.hid.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, c, d)
 
+    async def open_url(self, bundle, url) -> None:
+        """CoreDevice launchapplication with payloadURL, the field devicectl --payload-url sends. Settings is relaunched
+        so it follows the new link; other apps are only brought forward."""
+        import plistlib
+        from pymobiledevice3.remote.core_device.app_service import AppServiceService
+        async with AppServiceService(self.rsd) as apps:
+            await apps.invoke("com.apple.coredevice.feature.launchapplication", {
+                "applicationSpecifier": {"bundleIdentifier": {"_0": bundle}},
+                "options": {"arguments": [], "environmentVariables": {}, "standardIOUsesPseudoterminals": True,
+                            "startStopped": False, "terminateExisting": bundle == "com.apple.Preferences",
+                            "activates": True, "user": {"shortName": "mobile"}, "payloadURL": {"relative": url},
+                            "platformSpecificOptions": plistlib.dumps({})},
+                "standardIOIdentifiers": {}})
+
     async def keys(self, usages) -> None:
         await self.hid.send_keyboard(self.kb, usages)
         await asyncio.sleep(0.03)
@@ -338,6 +352,12 @@ class Phone:
             from pymobiledevice3.remote.core_device.pasteboard_service import snapshot_text
             return {"ok": True, "text": snapshot_text(await self.pasteboard.get())}
         elif cmd == "shot": return {"ok": True, **await self.shot(a[0] if a else None)}
+        elif cmd == "url":  # url BUNDLE_ID URL: open a deep link through this tunnel (works over --remote too)
+            if len(a) < 2:
+                raise BadInput("url BUNDLE_ID URL")
+            if a[1].split(":", 1)[0].lower() in ("tel", "telprompt", "facetime", "facetime-audio", "facetime-prompt"):
+                raise BadInput("calls are blocked: tel:/facetime: dial immediately")
+            await self.open_url(a[0], a[1])
         elif cmd == "display":  # the phone's real screen size, for screen_points / screen_scale in the config
             from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
             async with DeviceInfoService(self.rsd) as info:
