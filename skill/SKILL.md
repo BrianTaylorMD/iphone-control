@@ -22,6 +22,21 @@ never move money or trade: the user does those. Viewing, opening apps, scrolling
 Don't describe or quote private content you happen to see (messages, mail, photos) beyond what the task needs.
 Run `phone stop` / `wda stop` when done: while connected, the phone shows an indicator in the status bar / Dynamic Island.
 
+## 0. Fastest route first (measured 2026-10-25, iOS 27.0, cable)
+
+| Task | Fastest | Time | Fallback |
+|---|---|---|---|
+| Open a Settings page | `<skill>/bin/open settings NAME` (deep link) | 0.3 s | Spotlight: `tap search` + `type` + tap result, ~3 s |
+| Open any URL / app screen | `<skill>/bin/open URL [BUNDLE]`, `open app BUNDLE` | 0.2-0.5 s | `wda launch`, Spotlight |
+| Rearrange the whole Home Screen | `<skill>/bin/layout set SPEC.json` (one write, verified by re-read) | 2.3 s | `phone hold` drags, ~3 s per icon |
+| See the Home Screen without unlocking | `<skill>/bin/layout preview OUT.png` (SpringBoard render of page 1) | <1 s | `phone shot` (needs unlocked) |
+| Read the layout | `<skill>/bin/layout show` | 0.06 s | screenshots |
+
+`open` needs Xcode (`devicectl`) and the phone on the cable or same network; it refuses `tel:`/`facetime:` (they dial).
+Tested Settings names: general, display, battery, privacy, accessibility, wallpaper, focus, screen-time, notifications,
+siri, action-button. **Look, don't swipe, on carousel/picker screens** (Action button, Lock Screen styles): a swipe
+there changes the setting immediately, and fast swipes skip items.
+
 ## 1. Route first: does this need the phone?
 
 If the data syncs to the Mac through iCloud (Messages, Mail, Calendar, Reminders, Notes, Contacts, Safari tabs), use the

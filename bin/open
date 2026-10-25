@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""open — jump straight to a screen on the phone with a deep link (0.2-0.35 s; tapping there takes 3-6 s).
+
+  open settings NAME        a Settings page: see `open settings` for the tested names
+  open URL [BUNDLE_ID]      any URL; the app is inferred from the scheme (prefs:, shortcuts:, maps:, https:, ...)
+  open app BUNDLE_ID        launch an app (no URL)
+
+Uses Xcode's `devicectl device process launch --payload-url` (phone on the cable or on the same network as a paired
+Mac; not over Tailscale). Calls are blocked (tel:, facetime:): those place a call the moment they open.
+Tested on iOS 27.0 (2026-10-25); `prefs:root=` names that are not listed fall back to the main Settings page.
+"""
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phonecfg  # noqa: E402
+
+SETTINGS = {  # tested names -> prefs:root value
+    "general": "General", "display": "DISPLAY", "battery": "BATTERY_USAGE", "privacy": "Privacy",
+    "accessibility": "ACCESSIBILITY", "wallpaper": "Wallpaper", "focus": "DO_NOT_DISTURB",
+    "screen-time": "SCREEN_TIME", "notifications": "NOTIFICATIONS_ID", "siri": "SIRI", "action-button": "ACTION_BUTTON",
+}
+SCHEMES = {"prefs": "com.apple.Preferences", "app-prefs": "com.apple.Preferences", "shortcuts": "com.apple.shortcuts",
+           "maps": "com.apple.Maps", "http": "com.apple.mobilesafari", "https": "com.apple.mobilesafari",
+           "music": "com.apple.Music", "photos-redirect": "com.apple.mobileslideshow", "mailto": "com.apple.mobilemail"}
+BLOCKED = ("tel", "telprompt", "facetime", "facetime-audio", "facetime-prompt")
+
+
+def devicectl(*args):
+    env = dict(os.environ)
+    xcode = "/Applications/Xcode.app/Contents/Developer"
+    if "DEVELOPER_DIR" not in env and Path(xcode).exists():
+        env["DEVELOPER_DIR"] = xcode
+    udid = phonecfg.require(phonecfg.load(), "udid", "set udid in ~/.config/iphone-control/config.json")
+    t = time.time()
+    r = subprocess.run(["xcrun", "devicectl", "device", "process", "launch", "--device", udid, "--terminate-existing",
+                        *args], capture_output=True, text=True, env=env)
+    ok = r.returncode == 0
+    print(f'{{"ok": {str(ok).lower()}, "ms": {round((time.time() - t) * 1000)}}}' if ok else (r.stderr or r.stdout).strip()[-400:])
+    return 0 if ok else 1
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    if a[0] == "settings":
+        if len(a) < 2 or a[1] not in SETTINGS:
+            print("tested pages:", ", ".join(SETTINGS))
+            return 2
+        return devicectl("--payload-url", f"prefs:root={SETTINGS[a[1]]}", "com.apple.Preferences")
+    if a[0] == "app":
+        return devicectl(a[1])
+    url = a[0]
+    scheme = url.split(":", 1)[0].lower()
+    if scheme in BLOCKED:
+        print(f"blocked: {scheme}: starts a call. Ask the user to call themselves.")
+        return 2
+    bundle = a[1] if len(a) > 1 else SCHEMES.get(scheme)
+    if not bundle:
+        print(f"no app known for {scheme}: pass the bundle ID as the second argument")
+        return 2
+    return devicectl("--payload-url", url, bundle)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

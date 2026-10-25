@@ -66,6 +66,18 @@ Xcode 27.1. Treat these as facts for this setup, not guarantees for others.
 | Folder icon shows only one app | A folder that spilled onto a second page shows that page while in edit mode; it shows the first page again after Done. |
 | WebDriverAgent start | iOS 27 asked for the iPhone passcode ("Enter iPhone Passcode for XCTest, Enable UI Automation"). Agents must not type passcodes: dismiss it and use `phone` touches, or have the user enter it. |
 
+## Deep links and settings screens (iOS 27.0, 2026-10-25)
+
+| Thing | Result |
+|---|---|
+| `devicectl device process launch --payload-url URL BUNDLE` | Opens the URL in the app in 0.17-0.35 s (Settings, Shortcuts, Maps, Safari). Needs `DEVELOPER_DIR` pointing at Xcode. |
+| Settings `prefs:root=` that work | General, DISPLAY, BATTERY_USAGE, Privacy, ACCESSIBILITY, Wallpaper, DO_NOT_DISTURB (Focus), SCREEN_TIME, NOTIFICATIONS_ID, SIRI, ACTION_BUTTON. |
+| `prefs:root=` that fall back to the Settings root | FOCUS, CONTROL_CENTER, STANDBY, KEYBOARD. |
+| `maps://?q=` | Opens Maps but the query was not applied. |
+| Action button page | The carousel IS the setting: a swipe changes it at once, a swipe skips 2 items, and leaving "Shortcut" with none chosen falls to "No Action"; the chosen control is forgotten when you pass through other modes. Step one item by tapping beside the page dots. |
+| SpringBoard `getWallpaperPreviewImage homescreen` | Renders page 1 of the Home Screen with icons (1320 x 2868 PNG). A way to verify a layout write without the screen. |
+| `setIconState` dictionary form `{buttonBar, iconLists, ignored}` | Writing back the identical layout changed nothing (re-read matched, page count unchanged), 2.3 s including backup and verify. `ignored` = every installed User/System app (placeholders and hidden services included) not placed. |
+
 ## Approaches not taken
 
 - **Xcode 27's MCP device tools** (DeviceInteraction): Simulator-only on 27.1.

@@ -7,8 +7,8 @@ DEST="${1:-$HOME/.claude/skills/iphone}"
 mkdir -p "$DEST/bin" "$DEST/docs"
 cp skill/SKILL.md "$DEST/SKILL.md"
 cp docs/*.md "$DEST/docs/"
-cp bin/phone bin/phoned.py bin/phonecfg.py bin/wda bin/pin-host-id bin/iphonectl.swift "$DEST/bin/"
-chmod +x "$DEST/bin/phone" "$DEST/bin/phoned.py" "$DEST/bin/wda" "$DEST/bin/pin-host-id"
+cp bin/phone bin/phoned.py bin/phonecfg.py bin/wda bin/pin-host-id bin/layout bin/open bin/iphonectl.swift "$DEST/bin/"
+chmod +x "$DEST/bin/phone" "$DEST/bin/phoned.py" "$DEST/bin/wda" "$DEST/bin/pin-host-id" "$DEST/bin/layout" "$DEST/bin/open"
 if command -v swiftc >/dev/null 2>&1; then
   swiftc -O "$DEST/bin/iphonectl.swift" -o "$DEST/bin/iphonectl" -F /System/Library/PrivateFrameworks -framework SkyLight \
     && echo "built iphonectl" || echo "iphonectl build failed (Mirroring mode only; the rest works)"

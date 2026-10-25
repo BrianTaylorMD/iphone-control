@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""layout — read and write the whole Home Screen in one step (SpringBoard icon state over the cable or Wi-Fi sync).
+
+  layout show                     dock, pages and folders as an outline (names)
+  layout get [FILE]               save the exact current layout as JSON (default: a timestamped backup)
+  layout set SPEC.json            write a layout; backs up first, then re-reads to prove it landed
+  layout restore FILE             write back a layout saved by `get`
+  layout preview OUT.png          SpringBoard's own render of the Home Screen preview
+
+SPEC: {"dock": [app, ...], "pages": [[app | {"folder": "Name", "apps": [app, ...]} | widget-dict, ...], ...]}
+An app is a bundle ID or a display name (case-insensitive). Folders over 9 apps get more folder pages. Apps on the
+Home Screen now but not in the spec go to the App Library (still installed). Widget dicts from `get` pass through.
+
+Safety (measured on iOS 27.0): the write uses the dictionary form {buttonBar, iconLists, ignored}. `ignored` lists
+every installed app (placeholders and hidden system services included) that is not placed; without it SpringBoard
+spills App-Library-only apps onto new pages (technique documented by github.com/YakupEmreYerli/ios-homescreen, MIT). Hidden pages and Focus page links can't be expressed in this format:
+a write un-hides them. Before the first write on a phone, check that `layout show` lists exactly the pages you see.
+"""
+import asyncio
+import json
+import os
+import sys
+import time
+from copy import deepcopy
+from pathlib import Path
+
+# Run under pymobiledevice3's own interpreter (uv tool install pymobiledevice3); override with PHONE_PY.
+PY = Path(os.environ.get("PHONE_PY", Path.home() / ".local/share/uv/tools/pymobiledevice3/bin/python"))
+try:
+    import pymobiledevice3  # noqa: F401
+except ImportError:
+    if PY.exists() and Path(sys.executable).resolve() != PY.resolve():
+        os.execv(str(PY), [str(PY), __file__, *sys.argv[1:]])
+    sys.exit("pymobiledevice3 not found: `uv tool install pymobiledevice3`, or set PHONE_PY")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phonecfg  # noqa: E402
+
+BACKUPS = Path.home() / ".local/share/iphone-control/backups"
+
+
+def is_folder(x):
+    return isinstance(x, dict) and (x.get("listType") == "folder" or x.get("iconType") == "folder")
+
+
+def is_widget(x):
+    return isinstance(x, dict) and (x.get("elementType") == "widget" or x.get("iconType") == "custom" and "widgetIdentifier" in x)
+
+
+def app_id(x):
+    if isinstance(x, str):
+        return x
+    if isinstance(x, dict) and not is_folder(x) and not is_widget(x):
+        return x.get("bundleIdentifier") or x.get("displayIdentifier")
+    return None
+
+
+def name_of(x):
+    if is_folder(x):
+        return f"[{x.get('displayName') or 'Folder'}: " + ", ".join(name_of(i) for p in x["iconLists"] for i in p) + "]"
+    if is_widget(x):
+        return f"<widget {x.get('gridSize', '?')} {x.get('containerBundleIdentifier') or x.get('bundleIdentifier')}>"
+    if isinstance(x, dict):
+        return x.get("displayName") or app_id(x)
+    return str(x)
+
+
+def placed_apps(dock, pages):
+    out = []
+
+    def walk(item):
+        if is_folder(item):
+            for page in item["iconLists"]:
+                for inner in page:
+                    walk(inner)
+        elif app_id(item):
+            out.append(app_id(item))
+    for item in dock:
+        walk(item)
+    for page in pages:
+        for item in page:
+            walk(item)
+    return out
+
+
+def canonical(dock, pages):
+    def c(item):
+        if is_folder(item):
+            return ("folder", item.get("displayName", ""), tuple(tuple(c(i) for i in p) for p in item["iconLists"]))
+        if is_widget(item):
+            return ("widget", item.get("widgetIdentifier"), item.get("gridSize"))
+        return ("app", app_id(item))
+    return (tuple(c(i) for i in dock), tuple(tuple(c(i) for i in p) for p in pages))
+
+
+class Phone:
+    def __init__(self):
+        self.cfg = phonecfg.load()
+
+    async def __aenter__(self):
+        from pymobiledevice3.lockdown import create_using_usbmux
+        self.lockdown = await create_using_usbmux(serial=self.cfg.get("udid") or None)
+        return self
+
+    async def __aexit__(self, *exc):
+        close = getattr(self.lockdown, "close", None)
+        if close:
+            r = close()
+            if asyncio.iscoroutine(r):
+                await r
+
+    async def read(self):
+        from pymobiledevice3.services.springboard import SpringBoardServicesService
+        async with SpringBoardServicesService(self.lockdown) as sb:
+            state = await asyncio.wait_for(sb.get_icon_state(format_version="2"), 30)
+        return state[0], state[1:]
+
+    async def installed(self):
+        from pymobiledevice3.services.installation_proxy import InstallationProxyService
+        async with InstallationProxyService(self.lockdown) as ip:
+            apps = await asyncio.wait_for(ip.get_apps(application_type="Any", show_placeholders=True), 60)
+        return {b: a for b, a in apps.items() if a.get("ApplicationType") in ("User", "System")}
+
+    async def write(self, payload):
+        """setIconState on a raw connection: SpringBoard often never replies, so the reply gets 3 s."""
+        from pymobiledevice3.services.springboard import SpringBoardServicesService
+        sb = SpringBoardServicesService(self.lockdown)
+        try:
+            await asyncio.wait_for(sb.connect(), 10)
+            await asyncio.wait_for(sb.service.send_plist({"command": "setIconState", "iconState": payload}), 10)
+            try:
+                return await asyncio.wait_for(sb.service.recv_plist(), 3)
+            except Exception:
+                return None
+        finally:
+            try:
+                await asyncio.wait_for(sb.close(), 3)
+            except Exception:
+                pass
+
+    async def preview(self, which="homescreen"):
+        from pymobiledevice3.services.springboard import SpringBoardServicesService
+        async with SpringBoardServicesService(self.lockdown) as sb:
+            return await asyncio.wait_for(sb.get_wallpaper_preview_image(which), 30)
+
+
+def save_backup(dock, pages, label="layout"):
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    BACKUPS.chmod(0o700)
+    path = BACKUPS / f"{label}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    path.write_text(json.dumps([dock, *pages], indent=1, default=str))
+    path.chmod(0o600)
+    return path
+
+
+def resolve_spec(spec, dock, pages, installed):
+    """Turn names/IDs into icon-state items, reusing the current dicts so duplicates and metadata survive."""
+    current = {}
+    for item in [*dock, *(i for p in pages for i in p)]:
+        stack = [item]
+        while stack:
+            x = stack.pop()
+            if is_folder(x):
+                stack.extend(i for p in x["iconLists"] for i in p)
+            elif app_id(x):
+                current.setdefault(app_id(x), x)
+    by_name = {}
+    for b, a in installed.items():
+        for n in (a.get("CFBundleDisplayName"), a.get("CFBundleName")):
+            if n:
+                by_name.setdefault(n.strip().lstrip("‎").lower(), b)
+    for b, x in current.items():
+        n = isinstance(x, dict) and x.get("displayName")
+        if n:
+            by_name.setdefault(n.strip().lower(), b)
+    used = set()
+
+    def app(ref):
+        b = ref if (ref in installed or ref in current) else by_name.get(str(ref).strip().lower())
+        if not b:
+            raise SystemExit(f"unknown app {ref!r} (use a bundle ID; `layout show` lists names)")
+        if b in used:
+            raise SystemExit(f"{ref!r} is placed twice")
+        used.add(b)
+        return deepcopy(current.get(b, b))
+
+    def item(ref):
+        if isinstance(ref, dict) and "folder" in ref:
+            apps = [app(r) for r in ref["apps"]]
+            return {"displayName": ref["folder"], "listType": "folder",
+                    "iconLists": [apps[i:i + 9] for i in range(0, len(apps), 9)] or [[]]}
+        if isinstance(ref, dict):
+            return deepcopy(ref)          # widget dicts from `get` pass through
+        return app(ref)
+    new_dock = [item(r) for r in spec.get("dock", [])]
+    new_pages = [[item(r) for r in page] for page in spec.get("pages", [])]
+    return new_dock, new_pages
+
+
+async def apply(phone, new_dock, new_pages, force=False):
+    t0 = time.time()
+    dock, pages = await phone.read()
+    installed = await phone.installed()
+    backup = save_backup(dock, pages, "before-set")
+    placed = set(placed_apps(new_dock, new_pages))
+    leaving = [a for a in placed_apps(dock, pages) if a not in placed]
+    payload = {"buttonBar": new_dock, "iconLists": new_pages,
+               "ignored": sorted(b for b in installed if b not in placed)}
+    t1 = time.time()
+    await phone.write(payload)
+    await asyncio.sleep(1.0)
+    after_dock, after_pages = await phone.read()
+    ok = canonical(after_dock, after_pages) == canonical(new_dock, new_pages)
+    report = {"ok": ok, "write_s": round(time.time() - t1, 2), "total_s": round(time.time() - t0, 2),
+              "backup": str(backup), "pages": len(after_pages),
+              "to_app_library": [name_of(next((x for x in placed_apps(dock, pages) if x == a), a)) for a in leaving]}
+    if not ok:
+        want = canonical(new_dock, new_pages)
+        got = canonical(after_dock, after_pages)
+        report["expected_pages"] = len(want[1])
+        report["extra_after"] = [name_of(i) for p in after_pages[len(new_pages):] for i in p][:40]
+        report["hint"] = f"compare with `layout show`; undo with `layout restore {backup}`"
+    print(json.dumps(report, indent=1))
+    return ok
+
+
+async def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    async with Phone() as phone:
+        if cmd == "show":
+            t = time.time()
+            dock, pages = await phone.read()
+            print("DOCK:", " | ".join(name_of(i) for i in dock))
+            for n, page in enumerate(pages, 1):
+                print(f"PAGE {n}:", " | ".join(name_of(i) for i in page))
+            print(f"({time.time() - t:.2f} s)")
+        elif cmd == "get":
+            dock, pages = await phone.read()
+            if rest:
+                Path(rest[0]).write_text(json.dumps([dock, *pages], indent=1, default=str))
+                print(rest[0])
+            else:
+                print(save_backup(dock, pages, "get"))
+        elif cmd in ("set", "restore"):
+            if not rest:
+                print(f"usage: layout {cmd} FILE")
+                return 2
+            data = json.loads(Path(rest[0]).read_text())
+            if cmd == "restore":
+                new_dock, new_pages = data[0], data[1:]
+            else:
+                dock, pages = await phone.read()
+                new_dock, new_pages = resolve_spec(data, dock, pages, await phone.installed())
+            return 0 if await apply(phone, new_dock, new_pages, "--force" in rest) else 1
+        elif cmd == "preview":
+            out = rest[0] if rest else "home-preview.png"
+            Path(out).write_bytes(await phone.preview(rest[1] if len(rest) > 1 else "homescreen"))
+            print(out)
+        else:
+            print(f"unknown command {cmd}\n{__doc__}")
+            return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main(sys.argv[1:])))
