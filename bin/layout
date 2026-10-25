@@ -7,7 +7,9 @@
   layout restore FILE             write back a layout saved by `get`
   layout preview OUT.png          SpringBoard's own render of the Home Screen preview
 
-SPEC: {"dock": [app, ...], "pages": [[app | {"folder": "Name", "apps": [app, ...]} | widget-dict, ...], ...]}
+SPEC: {"dock": [app, ...], "pages": [[app | {"folder": "Name", "apps": [app, ...]} | widget, ...], ...]}
+widget = {"widget": "weather", "size": "small|medium|large"} | {"stack": ["spotify", "claude"], "size": "medium"}
+(names from docs/widgets.json) | a widget dict from `get`.
 An app is a bundle ID or a display name (case-insensitive). Folders over 9 apps get more folder pages. Apps on the
 Home Screen now but not in the spec go to the App Library (still installed). Widget dicts from `get` pass through.
 
@@ -37,14 +39,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import phonecfg  # noqa: E402
 
 BACKUPS = Path.home() / ".local/share/iphone-control/backups"
+WIDGETS = Path(__file__).resolve().parent.parent / "docs/widgets.json"
 
 
 def is_folder(x):
     return isinstance(x, dict) and (x.get("listType") == "folder" or x.get("iconType") == "folder")
 
 
-def is_widget(x):
-    return isinstance(x, dict) and (x.get("elementType") == "widget" or x.get("iconType") == "custom" and "widgetIdentifier" in x)
+def is_widget(x):  # a single widget or a Smart Stack ("elements")
+    return isinstance(x, dict) and (x.get("elementType") == "widget" or x.get("iconType") == "custom")
+
+
+def new_widget(spec):
+    """{"widget": NAME, "size": ...} or {"stack": [NAME, ...], "size": ...} -> a fresh icon-state dict."""
+    import uuid
+    catalog = json.loads(WIDGETS.read_text()) if WIDGETS.exists() else {}
+
+    def ident(name):
+        if name not in catalog:
+            raise SystemExit(f"unknown widget {name!r}; known: {', '.join(k for k in catalog if not k.startswith('_'))}")
+        return dict(catalog[name])
+    size = spec.get("size", "small")
+    base = {"displayIdentifier": str(uuid.uuid4()).upper(), "gridSize": size, "iconType": "custom", "iconLists": [],
+            "allowsSuggestions": False, "allowsExternalSuggestions": False}
+    if "stack" in spec:
+        return {**base, "elements": [{**ident(n), "elementType": "widget", "uniqueIdentifier": str(uuid.uuid4()).upper()}
+                                     for n in spec["stack"]]}
+    return {**base, **ident(spec["widget"]), "elementType": "widget"}
 
 
 def app_id(x):
@@ -59,6 +80,8 @@ def name_of(x):
     if is_folder(x):
         return f"[{x.get('displayName') or 'Folder'}: " + ", ".join(name_of(i) for p in x["iconLists"] for i in p) + "]"
     if is_widget(x):
+        if x.get("elements"):
+            return f"<stack {x.get('gridSize', '?')}: " + ", ".join(e.get("containerBundleIdentifier", "?") for e in x["elements"]) + ">"
         return f"<widget {x.get('gridSize', '?')} {x.get('containerBundleIdentifier') or x.get('bundleIdentifier')}>"
     if isinstance(x, dict):
         return x.get("displayName") or app_id(x)
@@ -88,7 +111,8 @@ def canonical(dock, pages):
         if is_folder(item):
             return ("folder", item.get("displayName", ""), tuple(tuple(c(i) for i in p) for p in item["iconLists"]))
         if is_widget(item):
-            return ("widget", item.get("widgetIdentifier"), item.get("gridSize"))
+            kinds = item.get("widgetIdentifier") or tuple(e.get("widgetIdentifier") for e in item.get("elements", []))
+            return ("widget", kinds, item.get("gridSize"))
         return ("app", app_id(item))
     return (tuple(c(i) for i in dock), tuple(tuple(c(i) for i in p) for p in pages))
 
@@ -164,15 +188,19 @@ def resolve_spec(spec, dock, pages, installed):
                 stack.extend(i for p in x["iconLists"] for i in p)
             elif app_id(x):
                 current.setdefault(app_id(x), x)
+    # Names: what the Home Screen shows now wins, then visible apps, User before System. Hidden system services
+    # (SBAppTags "hidden") share names like "Settings" or "Camera" (CarPlay, Clarity...), so they never match a name.
     by_name = {}
-    for b, a in installed.items():
-        for n in (a.get("CFBundleDisplayName"), a.get("CFBundleName")):
-            if n:
-                by_name.setdefault(n.strip().lstrip("‎").lower(), b)
     for b, x in current.items():
         n = isinstance(x, dict) and x.get("displayName")
         if n:
             by_name.setdefault(n.strip().lower(), b)
+    visible = [(b, a) for b, a in installed.items() if "hidden" not in (a.get("SBAppTags") or [])]
+    visible.sort(key=lambda ba: ba[1].get("ApplicationType") != "User")
+    for b, a in visible:
+        for n in (a.get("CFBundleDisplayName"), a.get("CFBundleName")):
+            if n:
+                by_name.setdefault(n.strip().lstrip("‎").lower(), b)
     used = set()
 
     def app(ref):
@@ -189,6 +217,8 @@ def resolve_spec(spec, dock, pages, installed):
             apps = [app(r) for r in ref["apps"]]
             return {"displayName": ref["folder"], "listType": "folder",
                     "iconLists": [apps[i:i + 9] for i in range(0, len(apps), 9)] or [[]]}
+        if isinstance(ref, dict) and ("widget" in ref or "stack" in ref):
+            return new_widget(ref)
         if isinstance(ref, dict):
             return deepcopy(ref)          # widget dicts from `get` pass through
         return app(ref)

@@ -31,6 +31,7 @@ Run `phone stop` / `wda stop` when done: while connected, the phone shows an ind
 | Rearrange the whole Home Screen | `<skill>/bin/layout set SPEC.json` (one write, verified by re-read) | 2.3 s | `phone hold` drags, ~3 s per icon |
 | See the Home Screen without unlocking | `<skill>/bin/layout preview OUT.png` (SpringBoard render of page 1) | <1 s | `phone shot` (needs unlocked) |
 | Read the layout | `<skill>/bin/layout show` | 0.06 s | screenshots |
+| Add widgets / a widget page | `layout set` with `{"widget": "weather", "size": "medium"}` or `{"stack": [...], "size": "large"}` (names in `docs/widgets.json`) | 2 s for a whole page | widget gallery, ~6 s per widget |
 
 `open` needs Xcode (`devicectl`) and the phone on the cable or same network; it refuses `tel:`/`facetime:` (they dial).
 Tested Settings names: general, display, battery, privacy, accessibility, wallpaper, focus, screen-time, notifications,

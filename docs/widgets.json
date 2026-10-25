@@ -1,0 +1,15 @@
+{
+ "_note": "Home Screen widget identities read from a real iPhone (iOS 27.0, 2026-10-25) via SpringBoard getIconState. layout writes {\"widget\": NAME, \"size\": small|medium|large} as a new widget with a fresh UUID; {\"stack\": [NAME, ...], \"size\": ...} makes a Smart Stack. Kinds not listed here: add one via the widget gallery once, then `layout get` shows its dict.",
+ "weather":          {"bundleIdentifier": "com.apple.weather.widget", "containerBundleIdentifier": "com.apple.weather", "widgetIdentifier": "com.apple.weather"},
+ "batteries":        {"bundleIdentifier": "com.apple.Batteries.BatteriesAvocadoWidgetExtension", "containerBundleIdentifier": "com.apple.Batteries", "widgetIdentifier": "BatteriesAvocadoWidget"},
+ "clock-digital":    {"bundleIdentifier": "com.apple.mobiletimer.WorldClockWidget", "containerBundleIdentifier": "com.apple.mobiletimer", "widgetIdentifier": "com.apple.mobiletimer.clock.digital"},
+ "calendar-up-next": {"bundleIdentifier": "com.apple.mobilecal.CalendarWidgetExtension", "containerBundleIdentifier": "com.apple.mobilecal", "widgetIdentifier": "com.apple.CalendarWidget.CalendarUpNextWidget"},
+ "calendar-month":   {"bundleIdentifier": "com.apple.mobilecal.CalendarWidgetExtension", "containerBundleIdentifier": "com.apple.mobilecal", "widgetIdentifier": "com.apple.CalendarWidget.CalendarMonthWidget"},
+ "photos":           {"bundleIdentifier": "com.apple.mobileslideshow.PhotosReliveWidget", "containerBundleIdentifier": "com.apple.mobileslideshow", "widgetIdentifier": "com.apple.mobileslideshow.PhotosReliveWidget"},
+ "mail":             {"bundleIdentifier": "com.apple.mobilemail.MailWidgetExtension", "containerBundleIdentifier": "com.apple.mobilemail", "widgetIdentifier": "com.apple.mobilemail.MessagesWidget"},
+ "spotify":          {"bundleIdentifier": "com.spotify.client.widgetnowplaying", "containerBundleIdentifier": "com.spotify.client", "widgetIdentifier": "NowPlaying"},
+ "claude":           {"bundleIdentifier": "com.anthropic.claude.ClaudeWidgetExtension", "containerBundleIdentifier": "com.anthropic.claude", "widgetIdentifier": "WidgetExtension"},
+ "chrome":           {"bundleIdentifier": "com.google.chrome.ios.WidgetKitExtension", "containerBundleIdentifier": "com.google.chrome.ios", "widgetIdentifier": "ShortcutsWidget"},
+ "telegram":         {"bundleIdentifier": "ph.telegra.Telegraph.Widget", "containerBundleIdentifier": "ph.telegra.Telegraph", "widgetIdentifier": "Static_AvatarsWidget"},
+ "google-tasks":     {"bundleIdentifier": "com.google.tasks.WidgetKitExtension", "containerBundleIdentifier": "com.google.tasks", "widgetIdentifier": "com.google.tasks.widget.preview"}
+}

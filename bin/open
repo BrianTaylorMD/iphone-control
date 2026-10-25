@@ -29,15 +29,17 @@ SCHEMES = {"prefs": "com.apple.Preferences", "app-prefs": "com.apple.Preferences
 BLOCKED = ("tel", "telprompt", "facetime", "facetime-audio", "facetime-prompt")
 
 
-def devicectl(*args):
+def devicectl(*args, restart=False):
+    """restart=True relaunches the app (needed for Settings to follow a new prefs: link). Never for other apps:
+    it would stop music, end navigation or drop a draft."""
     env = dict(os.environ)
     xcode = "/Applications/Xcode.app/Contents/Developer"
     if "DEVELOPER_DIR" not in env and Path(xcode).exists():
         env["DEVELOPER_DIR"] = xcode
     udid = phonecfg.require(phonecfg.load(), "udid", "set udid in ~/.config/iphone-control/config.json")
     t = time.time()
-    r = subprocess.run(["xcrun", "devicectl", "device", "process", "launch", "--device", udid, "--terminate-existing",
-                        *args], capture_output=True, text=True, env=env)
+    r = subprocess.run(["xcrun", "devicectl", "device", "process", "launch", "--device", udid,
+                        *(["--terminate-existing"] if restart else []), *args], capture_output=True, text=True, env=env)
     ok = r.returncode == 0
     print(f'{{"ok": {str(ok).lower()}, "ms": {round((time.time() - t) * 1000)}}}' if ok else (r.stderr or r.stdout).strip()[-400:])
     return 0 if ok else 1
@@ -51,7 +53,7 @@ def main(a):
         if len(a) < 2 or a[1] not in SETTINGS:
             print("tested pages:", ", ".join(SETTINGS))
             return 2
-        return devicectl("--payload-url", f"prefs:root={SETTINGS[a[1]]}", "com.apple.Preferences")
+        return devicectl("--payload-url", f"prefs:root={SETTINGS[a[1]]}", "com.apple.Preferences", restart=True)
     if a[0] == "app":
         return devicectl(a[1])
     url = a[0]
@@ -63,7 +65,7 @@ def main(a):
     if not bundle:
         print(f"no app known for {scheme}: pass the bundle ID as the second argument")
         return 2
-    return devicectl("--payload-url", url, bundle)
+    return devicectl("--payload-url", url, bundle, restart=bundle == "com.apple.Preferences")
 
 
 if __name__ == "__main__":

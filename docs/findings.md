@@ -78,6 +78,15 @@ Xcode 27.1. Treat these as facts for this setup, not guarantees for others.
 | SpringBoard `getWallpaperPreviewImage homescreen` | Renders page 1 of the Home Screen with icons (1320 x 2868 PNG). A way to verify a layout write without the screen. |
 | `setIconState` dictionary form `{buttonBar, iconLists, ignored}` | Writing back the identical layout changed nothing (re-read matched, page count unchanged), 2.3 s including backup and verify. `ignored` = every installed User/System app (placeholders and hidden services included) not placed. |
 
+## Widgets by layout write (iOS 27.0, 2026-10-25)
+
+| Thing | Result |
+|---|---|
+| Create a NEW widget with `setIconState` | **Works**: a widget dict with a fresh UUID `displayIdentifier` appears and renders live (Calendar, Weather, Batteries, Clock, Spotify, Photos, Smart Stacks). Public projects listed this as unproven or impossible. |
+| Unsupported size | Silently dropped: Claude's widget vanished from a `large` Smart Stack (re-read shows the stack without it). Re-read after every write. |
+| Learning a widget's identity | Add it once from the gallery (or add a Smart Stack: it carries ~7 widgets), then `layout get`. Catalog: `docs/widgets.json`. |
+| Photos widget | Shows "Featured Content is Turned Off" when the user turned that off: pick another widget. |
+
 ## Approaches not taken
 
 - **Xcode 27's MCP device tools** (DeviceInteraction): Simulator-only on 27.1.

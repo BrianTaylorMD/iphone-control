@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 DEST="${1:-$HOME/.claude/skills/iphone}"
 mkdir -p "$DEST/bin" "$DEST/docs"
 cp skill/SKILL.md "$DEST/SKILL.md"
-cp docs/*.md "$DEST/docs/"
+cp docs/*.md docs/*.json "$DEST/docs/"
 cp bin/phone bin/phoned.py bin/phonecfg.py bin/wda bin/pin-host-id bin/layout bin/open bin/iphonectl.swift "$DEST/bin/"
 chmod +x "$DEST/bin/phone" "$DEST/bin/phoned.py" "$DEST/bin/wda" "$DEST/bin/pin-host-id" "$DEST/bin/layout" "$DEST/bin/open"
 if command -v swiftc >/dev/null 2>&1; then
